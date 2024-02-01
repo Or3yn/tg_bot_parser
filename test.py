@@ -1,11 +1,10 @@
 from env import *
 import telebot
 from telethon.sync import TelegramClient
-from datetime import datetime
+from datetime import datetime, timezone
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetHistoryRequest
 import asyncio
-
 
 bot = telebot.TeleBot(token)
 session_name = "NewsCollector"
@@ -18,6 +17,7 @@ loop = asyncio.new_event_loop()
 # Создаем клиент Telethon внутри нового цикла событий
 client = TelegramClient(session_name, api_id, api_hash, loop=loop)
 client.start()
+
 
 @bot.message_handler(commands=['add_group'])
 def add_group(message):
@@ -75,21 +75,28 @@ async def parse_posts(message):
     date_time_str = message.text
     date_time_obj = datetime.strptime(date_time_str, '%d.%m.%Y %H:%M')
 
-    for group in group_list:
-        channel = await client(GetFullChannelRequest(group))
-        posts = await client(GetHistoryRequest(
-            peer=channel,
-            limit=100,
-            offset_date=datetime.timestamp(date_time_obj),
-            add_offset=0,
-            max_id=0,
-            min_id=0,
-            hash=0
-        ))
-        for post in posts.messages:
-            loop.call_soon(send_message_sync, id_channel, post.message)
+    # Convert local time to UTC
+    date_time_obj = date_time_obj.replace(tzinfo=timezone.utc)
 
-    loop.call_soon(send_message_sync, message.chat.id, "Выгрузка постов успешно завершена.")
+    for group in group_list:
+        try:
+            channel = await client(GetFullChannelRequest(group))
+            posts = await client(GetHistoryRequest(
+                peer=channel,
+                limit=100,
+                # Get the timestamp in UTC
+                offset_date=int(date_time_obj.timestamp()),
+                add_offset=0,
+                max_id=0,
+                min_id=0,
+                hash=0
+            ))
+            for post in posts.messages:
+                # Отправляем сообщение в ваш канал
+                bot.send_message(channel_id, post.message)
+            bot.send_message(message.chat.id, "Выгрузка постов успешно завершена.")
+        except Exception as e:
+            bot.send_message(message.chat.id, "Произошла ошибка выгрузки постов")
 
 
 bot.polling()
